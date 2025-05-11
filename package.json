@@ -1,0 +1,33 @@
+{
+  "$schema": "https://json.schemastore.org/package",
+  "name": "hsmw-gym-scraper-front-end",
+  "version": "0.0.1",
+  "main": "index.js",
+  "type": "module",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "start": "tsc && npm run copy && node dist/index.js",
+    "copy": "copyfiles -u 1 src/**/*.html dist && copyfiles -u 1 src/**/*.css dist",
+    "dev": "nodemon -e ts,html,css --exec \"tsc && npm run copy && node dist/index.js\""
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/YukioE/hsmw-gym-scraper-front-end.git"
+  },
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/YukioE/hsmw-gym-scraper-front-end/issues"
+  },
+  "homepage": "https://github.com/YukioE/hsmw-gym-scraper-front-end#readme",
+  "description": "",
+  "devDependencies": {
+    "@types/express": "^5.0.1",
+    "@types/node": "^22.15.17",
+    "@types/typescript": "^0.4.29",
+    "copyfiles": "^2.4.1",
+    "express": "^5.1.0",
+    "nodemon": "^3.1.10",
+    "typescript": "^5.8.3"
+  }
+}
