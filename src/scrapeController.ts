@@ -1,10 +1,10 @@
 import { Request, Response } from "express";
 import { getBrowser } from "./browser.js";
+import bcrypt from "bcrypt";
 
 export const scrapeTimeSlots = async (req: Request, res: Response) => {
-    const url = process.env.URL;
-    const envPassword = process.env.PASSWORD;
-    const { password } = req.body;
+    const { PASSWORD: envPassword, URL: url } = process.env;
+    const { password } = req.cookies;
 
     if (!url) {
         res.status(500).json({ error: "URL is not set in .env file" });
@@ -12,13 +12,13 @@ export const scrapeTimeSlots = async (req: Request, res: Response) => {
     }
 
     if (!password) {
-        res.status(500).json({ error: "Password is missing" });
+        res.status(400).json({ error: "Password is missing" });
         return;
     }
 
     // TODO: implement safety against brute force attacks
-    if (envPassword !== password) {
-        res.status(500).json({ error: "Password is incorrect" });
+    if (bcrypt.hash(envPassword, 12) !== password) {
+        res.status(403).json({ error: "Password is incorrect" });
         return;
     }
 
@@ -57,27 +57,33 @@ export const scrapeTimeSlots = async (req: Request, res: Response) => {
 
     // return if no weeks are currently available
     if (Object.keys(weeks).length == 0) {
-        res.status(500).json({ error: "No weeks found" });
+        res.status(404).json({ error: "No weeks found" });
         return;
     }
 
-    // scrape each week and store the results in the timeslots Record (e.g. { 1: ["slot1", "slot2"], 2: ["slot3", "slot4"] })
+    // scrape each week and store the results in the timeslots Record (e.g. { KW: <slot, yes/no> })
     const timeslotEntries = await Promise.all(
         Object.entries(weeks).map(async ([weekNumber, weekURL]) => {
             const slots = await scrapeWeek(weekURL);
             return [Number(weekNumber), slots] as const;
         })
     );
-    const timeslots: Record<number, string[]> = Object.fromEntries(timeslotEntries);
+    const timeslots: Record<number, Map<string, boolean>> = Object.fromEntries(timeslotEntries);
+
+    const timeslotsRecord: Record<number, Record<string, boolean>> = {};
+
+    for (const [week, map] of Object.entries(timeslots)) {
+        timeslotsRecord[Number(week)] = Object.fromEntries(map);
+    }
 
     // close page and send the results as JSON to the client
     await page.close();
-    const data = JSON.stringify(timeslots, null, 2);
+    const data = JSON.stringify(timeslotsRecord, null, 2);
     res.status(200).send(data);
     return;
 };
 
-const scrapeWeek = async (weekURL: string): Promise<string[]> => {
+const scrapeWeek = async (weekURL: string): Promise<Map<string, boolean>> => {
 
     // open new page and navigate to the week URL
     const browser = await getBrowser();
@@ -93,7 +99,7 @@ const scrapeWeek = async (weekURL: string): Promise<string[]> => {
     }
 
     // Extract all headers with IDs and titles
-    const slotMap = await page.$$eval(".results thead th", (ths) => {
+    const idTitleMap = await page.$$eval(".results thead th", (ths) => {
         const map: Record<string, string> = {};
         ths.forEach((el) => {
             const id = el.getAttribute("id");
@@ -105,22 +111,25 @@ const scrapeWeek = async (weekURL: string): Promise<string[]> => {
         return map;
     });
 
-    // Remove headers that have no "yes" slot in their corresponding td
-    const usedHeaders = await page.$$eval(".results tbody td", (tds) => {
-        const headersToKeep = new Set<string>();
+    // returns all the slots that are taken
+    const takenSlots: string[] = await page.$$eval(".results tbody td", (tds) => {
+        const slots: string[] = [];
         tds.forEach((td) => {
             const headers = td.getAttribute("headers");
             if (!headers) return;
             const hasYes = td.innerHTML.includes('class="yes"');
-            if (hasYes) headersToKeep.add(headers);
+            if (!hasYes) { slots.push(headers); }
         });
-        return [...headersToKeep];
+        return slots;
     });
-
-    // filter out not available slots
-    const filteredSlots = usedHeaders.map((header) => slotMap[header]).filter(Boolean);
 
     await page.close();
 
-    return filteredSlots;
+    const slots = new Map<string, boolean>();
+    Object.entries(idTitleMap).forEach(([id, title]) => {
+        const isTaken = takenSlots.includes(id);
+        slots.set(title, isTaken);
+    });
+
+    return slots;
 };
