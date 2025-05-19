@@ -3,21 +3,23 @@ import { getBrowser } from "./browser.js";
 import bcrypt from "bcrypt";
 
 export const scrapeTimeSlots = async (req: Request, res: Response) => {
-    const { PASSWORD: envPassword, URL: url } = process.env;
-    const { password } = req.cookies;
+    const { PASSWORD: envHash, URL: url } = process.env;
+    const clientPassword = req.cookies.password;
 
     if (!url) {
         res.status(500).json({ error: "URL is not set in .env file" });
         return;
     }
 
-    if (!password) {
+    if (!clientPassword) {
         res.status(400).json({ error: "Password is missing" });
         return;
     }
 
+    const correctPassword = await bcrypt.compare(clientPassword, envHash);
+
     // TODO: implement safety against brute force attacks
-    if (bcrypt.hash(envPassword, 12) !== password) {
+    if (!correctPassword) {
         res.status(403).json({ error: "Password is incorrect" });
         return;
     }
@@ -36,24 +38,31 @@ export const scrapeTimeSlots = async (req: Request, res: Response) => {
     await page.waitForSelector(".hsmw-main");
 
     // extract the week number and the corresponding link from the page
-    const weeks: Record<number, string> = await page.$$eval(".ext_link", (elements) => {
-        const weeks: Record<number, string> = {};
-        const weekLinks = elements
-            .map((el) => {
-                const href = el.getAttribute("href");
-                const title = el.getAttribute("title");
-                const innerhtml = el.innerHTML
-                return { href, title, innerhtml };
-            })
-            .filter(({ href, title }) => href?.includes("terminplaner") && title?.includes("Zur Trainingsanmeldung"))
+    const weeks: Record<number, string> = await page.$$eval(
+        ".ext_link",
+        (elements) => {
+            const weeks: Record<number, string> = {};
+            const weekLinks = elements
+                .map((el) => {
+                    const href = el.getAttribute("href");
+                    const title = el.getAttribute("title");
+                    const innerhtml = el.innerHTML;
+                    return { href, title, innerhtml };
+                })
+                .filter(
+                    ({ href, title }) =>
+                        href?.includes("terminplaner") &&
+                        title?.includes("Zur Trainingsanmeldung"),
+                );
 
-        weekLinks.forEach(({ href, innerhtml, }) => {
-            const weekNumber = parseInt(innerhtml.split(" ")[1]);
-            weeks[weekNumber] = href;
-        });
+            weekLinks.forEach(({ href, innerhtml }) => {
+                const weekNumber = parseInt(innerhtml.split(" ")[1]);
+                weeks[weekNumber] = href;
+            });
 
-        return weeks;
-    });
+            return weeks;
+        },
+    );
 
     // return if no weeks are currently available
     if (Object.keys(weeks).length == 0) {
@@ -64,11 +73,13 @@ export const scrapeTimeSlots = async (req: Request, res: Response) => {
     // scrape each week and store the results in the timeslots Record (e.g. { KW: <slot, yes/no> })
     const timeslotEntries = await Promise.all(
         Object.entries(weeks).map(async ([weekNumber, weekURL]) => {
-            const slots = await scrapeWeek(weekURL);
+            const slots = await scrapeWeek(weekURL, clientPassword);
             return [Number(weekNumber), slots] as const;
-        })
+        }),
     );
-    const timeslots: Record<number, Map<string, boolean>> = Object.fromEntries(timeslotEntries);
+    const timeslots: Record<number, Map<string, boolean>> = Object.fromEntries(
+        timeslotEntries,
+    );
 
     const timeslotsRecord: Record<number, Record<string, boolean>> = {};
 
@@ -83,8 +94,10 @@ export const scrapeTimeSlots = async (req: Request, res: Response) => {
     return;
 };
 
-const scrapeWeek = async (weekURL: string): Promise<Map<string, boolean>> => {
-
+const scrapeWeek = async (
+    weekURL: string,
+    password: string,
+): Promise<Map<string, boolean>> => {
     // open new page and navigate to the week URL
     const browser = await getBrowser();
     const page = await browser.newPage();
@@ -93,7 +106,7 @@ const scrapeWeek = async (weekURL: string): Promise<Map<string, boolean>> => {
     // type password if input is present
     const passwordInput = await page.$("#password");
     if (passwordInput) {
-        await page.type("#password", process.env.PASSWORD);
+        await page.type("#password", password);
         await page.click(".btn-success");
         await page.waitForSelector(".results");
     }
@@ -112,16 +125,21 @@ const scrapeWeek = async (weekURL: string): Promise<Map<string, boolean>> => {
     });
 
     // returns all the slots that are taken
-    const takenSlots: string[] = await page.$$eval(".results tbody td", (tds) => {
-        const slots: string[] = [];
-        tds.forEach((td) => {
-            const headers = td.getAttribute("headers");
-            if (!headers) return;
-            const hasYes = td.innerHTML.includes('class="yes"');
-            if (!hasYes) { slots.push(headers); }
-        });
-        return slots;
-    });
+    const takenSlots: string[] = await page.$$eval(
+        ".results tbody td",
+        (tds) => {
+            const slots: string[] = [];
+            tds.forEach((td) => {
+                const headers = td.getAttribute("headers");
+                if (!headers) return;
+                const hasYes = td.innerHTML.includes('class="yes"');
+                if (!hasYes) {
+                    slots.push(headers);
+                }
+            });
+            return slots;
+        },
+    );
 
     await page.close();
 

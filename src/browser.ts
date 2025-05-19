@@ -1,14 +1,14 @@
-import puppeteer, { Browser } from 'puppeteer';
+import puppeteer, { Browser } from "puppeteer";
 
 let browserInstance: Browser | null = null;
 
 export const getBrowser = async (): Promise<Browser> => {
     if (!browserInstance) {
         browserInstance = await puppeteer.launch({
-            headless: true,
+            headless: false,
             args: ["--disable-setuid-sandbox"],
-            'ignoreHTTPSErrors': true
+            ignoreHTTPSErrors: true,
         });
     }
     return browserInstance;
-}
+};
