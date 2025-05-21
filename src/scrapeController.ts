@@ -1,8 +1,20 @@
 import { Request, Response } from "express";
 import { getBrowser } from "./browser.js";
 import bcrypt from "bcrypt";
+import { Timeslot, WeekResult } from "./utils.js";
 
-export const scrapeTimeSlots = async (req: Request, res: Response) => {
+/**
+ * api route to scrape the time slots
+ *
+ * 1. scrape the main page for all weeks links
+ * 2. scrape each week for the time slots
+ * 3. return the results as JSON
+ *
+ * @param req - express request object
+ * @param res - express response object
+ * @returns {Promise<void>} - void
+ */
+export const scrapeTimeSlots = async (req: Request, res: Response): Promise<void> => {
     const { PASSWORD: envHash, URL: url } = process.env;
     const clientPassword = req.cookies.password;
 
@@ -24,6 +36,69 @@ export const scrapeTimeSlots = async (req: Request, res: Response) => {
         return;
     }
 
+    const weeks = await getWeeks(url);
+
+    // return if no weeks are currently available
+    if (Object.keys(weeks).length == 0) {
+        res.status(404).json({ error: "No weeks found" });
+        return;
+    }
+
+    const results: WeekResult[] = await Promise.all(
+        Object.entries(weeks).map(async ([weekNumber, weekLink]) => {
+            const timeslots = await scrapeWeek(weekLink, clientPassword);
+            return {
+                link: weekLink,
+                weekNumber: parseInt(weekNumber),
+                timeslots,
+            } satisfies WeekResult;
+        })
+    );
+
+    // send the results as JSON to the client
+    const data = JSON.stringify(results, null, 2);
+    res.status(200).send(data);
+    return;
+};
+
+const scrapeWeek = async (
+    weekURL: string,
+    password: string,
+): Promise<Timeslot[]> => {
+    // open new page and navigate to the week URL
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    await page.goto(weekURL);
+
+    // type password if input is present
+    const passwordInput = await page.$("#password");
+    if (passwordInput) {
+        await page.type("#password", password);
+        await page.click(".btn-success");
+        await page.waitForSelector(".results");
+    }
+
+    // id, datetime, available, selected
+    const timeslots: Timeslot[] = [];
+
+    // Extract all headers with IDs and titles
+    await page.$$eval(".results thead th"
+
+        // returns all the slots that are taken
+        await page.$$eval(".results tbody td",
+
+
+
+        await page.close();
+    return slots;
+};
+
+const getSelectedTimeslots = async (weekURL: string): Promise<boolean[]> => {
+    return null;
+}
+
+
+const getWeeks = async (url: string): Promise<Record<number, string>> => {
     // goto main url and wait for the page to load
     const browser = await getBrowser();
     const page = await browser.newPage();
@@ -63,91 +138,6 @@ export const scrapeTimeSlots = async (req: Request, res: Response) => {
             return weeks;
         },
     );
-
-    // return if no weeks are currently available
-    if (Object.keys(weeks).length == 0) {
-        res.status(404).json({ error: "No weeks found" });
-        return;
-    }
-
-    // scrape each week and store the results in the timeslots Record (e.g. { KW: <slot, yes/no> })
-    const timeslotEntries = await Promise.all(
-        Object.entries(weeks).map(async ([weekNumber, weekURL]) => {
-            const slots = await scrapeWeek(weekURL, clientPassword);
-            return [Number(weekNumber), slots] as const;
-        }),
-    );
-    const timeslots: Record<number, Map<string, boolean>> = Object.fromEntries(
-        timeslotEntries,
-    );
-
-    const timeslotsRecord: Record<number, Record<string, boolean>> = {};
-
-    for (const [week, map] of Object.entries(timeslots)) {
-        timeslotsRecord[Number(week)] = Object.fromEntries(map);
-    }
-
-    // close page and send the results as JSON to the client
-    await page.close();
-    const data = JSON.stringify(timeslotsRecord, null, 2);
-    res.status(200).send(data);
-    return;
-};
-
-const scrapeWeek = async (
-    weekURL: string,
-    password: string,
-): Promise<Map<string, boolean>> => {
-    // open new page and navigate to the week URL
-    const browser = await getBrowser();
-    const page = await browser.newPage();
-    await page.goto(weekURL);
-
-    // type password if input is present
-    const passwordInput = await page.$("#password");
-    if (passwordInput) {
-        await page.type("#password", password);
-        await page.click(".btn-success");
-        await page.waitForSelector(".results");
-    }
-
-    // Extract all headers with IDs and titles
-    const idTitleMap = await page.$$eval(".results thead th", (ths) => {
-        const map: Record<string, string> = {};
-        ths.forEach((el) => {
-            const id = el.getAttribute("id");
-            const title = el.getAttribute("title");
-            if (id && title) {
-                map[id] = title;
-            }
-        });
-        return map;
-    });
-
-    // returns all the slots that are taken
-    const takenSlots: string[] = await page.$$eval(
-        ".results tbody td",
-        (tds) => {
-            const slots: string[] = [];
-            tds.forEach((td) => {
-                const headers = td.getAttribute("headers");
-                if (!headers) return;
-                const hasYes = td.innerHTML.includes('class="yes"');
-                if (!hasYes) {
-                    slots.push(headers);
-                }
-            });
-            return slots;
-        },
-    );
-
-    await page.close();
-
-    const slots = new Map<string, boolean>();
-    Object.entries(idTitleMap).forEach(([id, title]) => {
-        const isTaken = takenSlots.includes(id);
-        slots.set(title, isTaken);
-    });
-
-    return slots;
-};
+    page.close();
+    return weeks;
+}

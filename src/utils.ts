@@ -37,3 +37,16 @@ export function getCookie(cname: string) {
     }
     return "";
 }
+
+export interface Timeslot {
+    id: string;
+    datetime: string;
+    available: boolean;
+    selected: boolean;
+}
+
+export interface WeekResult {
+    link: string;
+    weekNumber: number;
+    timeslots: Timeslot[];
+}
