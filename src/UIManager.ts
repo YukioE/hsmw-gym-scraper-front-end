@@ -1,4 +1,4 @@
-import { $, getCookie, setCookie } from "./utils.js";
+import { $, $$, getCookie, setCookie, WeekResult } from "./utils.js";
 
 export class UIManager {
     constructor() {
@@ -10,6 +10,7 @@ export class UIManager {
         this.initLoginForm();
         this.initLogoutButton();
         this.scrapeTimeSlots();
+        this.initSubmitSelectionButton();
     }
 
     private initLoginForm() {
@@ -37,7 +38,7 @@ export class UIManager {
 
             setCookie("username", username);
             setCookie("email", email);
-            setCookie("password", password);
+            setCookie("password", password, new Date(Date.now() + 30 * 60 * 1000)); // 30 minutes expiration
 
             [...loginForm.children].forEach((child) => {
                 child.classList.add("hidden");
@@ -89,11 +90,11 @@ export class UIManager {
 
     private scrapeTimeSlots() {
         const button = document.createElement("button");
-        const output = $<HTMLDivElement>(".week-container");
+        const output = $<HTMLDivElement>(".weeks-container");
         button.textContent = "Scrape Data";
 
         button.addEventListener("click", async () => {
-            output.innerHTML = "";
+            output.innerHTML = "scraping...";
             const fetchOptions = {
                 method: "POST",
                 headers: {
@@ -101,36 +102,123 @@ export class UIManager {
                 },
             };
 
-            const response = await fetch("/api/", fetchOptions);
+            const response = await fetch("/scrape/", fetchOptions);
 
             if (!response.ok) {
                 output.innerHTML = "Error: " + response.statusText;
                 return;
             }
 
-            const data = (await response.json()) as Record<
-                number,
-                Record<string, boolean>
-            >;
+            const data = (await response.json()) as WeekResult[];
 
-            Object.entries(data).forEach(([_, weekData]) => {
-                const weekTable = document.createElement("table");
-                const weekBody = document.createElement("tbody");
-                weekTable.innerHTML = `<thead><tr><th>Slot</th><th>yes</th><th>no</th></tr></thead>`;
+            if (data.length === 0) {
+                output.innerHTML = "No weeks found.";
+                return;
+            }
 
-                Object.entries(weekData).forEach(([slot, isTaken]) => {
-                    const row = document.createElement("tr");
-                    row.innerHTML = `<td>${slot}</td>
-                                     <td><input type="checkbox" ${isTaken ? "checked" : ""}></td>
-                                     <td><input type="checkbox" ${!isTaken ? "checked" : ""}></td>`;
-                    weekBody.appendChild(row);
-                });
-
-                weekTable.appendChild(weekBody);
-                output.appendChild(weekTable);
+            // create week select options
+            const weekSelect = $<HTMLSelectElement>(".week-select");
+            weekSelect.innerHTML = "";
+            data.forEach((week) => {
+                // TODO: start and end dates
+                const option = document.createElement("option");
+                option.value = week.link.split("/").pop() || "";
+                option.textContent = `Week ${week.weekNumber}`;
+                weekSelect.appendChild(option);
             });
+
+            // add event listener to week select, call populateWeekContainer on change
+            weekSelect.addEventListener("change", (event) => {
+                const selectedWeek = (event.target as HTMLSelectElement).value;
+                output.innerHTML = "";
+                const weekData = data.find((week) => week.link.endsWith(selectedWeek));
+                if (weekData) {
+                    this.populateWeekContainer(weekData);
+                } else {
+                    output.innerHTML = "No data found for the selected week.";
+                }
+            });
+
+            weekSelect.dispatchEvent(new Event("change"));
         });
 
         output.after(button);
+    }
+
+    private populateWeekContainer(data: WeekResult) {
+        const output = $<HTMLDivElement>(".weeks-container");
+        output.innerHTML = `<h2>Week ${data.weekNumber}</h2>`;
+
+        const link = document.createElement("div");
+        link.className = "week-link hidden";
+        link.innerHTML = `${data.link}`;
+        output.appendChild(link);
+
+        // output the current edit link if it exists
+        const editLink = document.createElement("div");
+        editLink.className = "edit-link";
+        editLink.innerHTML = `<p>Link: <a href="${data.editLink}" target="_blank">${data.editLink}</a></p>`;
+        output.appendChild(editLink);
+
+        const timeslotContainer = document.createElement("div");
+        timeslotContainer.className = "timeslot-container";
+
+        // create checkboxes for each timeslot
+        data.timeslots.forEach((slot) => {
+            const slotDiv = document.createElement("div");
+            slotDiv.className = "timeslot";
+
+            const checkbox = document.createElement("input");
+            checkbox.type = "checkbox";
+            checkbox.id = slot.id;
+            checkbox.checked = slot.selected;
+            checkbox.disabled = !slot.available && !slot.selected;
+
+            const label = document.createElement("label");
+            label.htmlFor = slot.id;
+            label.textContent = `${slot.datetime}`;
+
+            slotDiv.appendChild(checkbox);
+            slotDiv.appendChild(label);
+            timeslotContainer.appendChild(slotDiv);
+        });
+
+        output.appendChild(timeslotContainer);
+    }
+
+    private initSubmitSelectionButton() {
+        const button = $<HTMLButtonElement>(".submit-selection");
+
+        button.addEventListener("click", async () => {
+            const selectedSlots = $$(".timeslot input[type='checkbox']:checked");
+            if (selectedSlots.length === 0) {
+                alert("Please select at least one timeslot.");
+                return;
+            }
+
+            const selectedTimeslots = selectedSlots.map((slot) => ({
+                id: slot.id,
+            }));
+
+            // TODO: send post request to server on /submit with selectedTimeslots id array
+            button.innerHTML = "Submitting...";
+            const fetchOptions = {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                },
+                body: JSON.stringify({ ids: selectedTimeslots }),
+            };
+
+            const response = await fetch("/submit/", fetchOptions);
+
+            if (!response.ok) {
+                button.innerHTML = "Error: " + response.statusText;
+                return;
+            }
+
+            alert("Selection submitted successfully!");
+            button.innerHTML = "Submit";
+        });
     }
 }

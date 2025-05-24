@@ -1,8 +1,9 @@
 import { Router } from "express";
-import { scrapeTimeSlots } from "./scrapeController.js";
+import { scrapeTimeSlots, submitTimeSlots } from "./scrapeController.js";
 
 const router = Router();
 
-router.post("/api", scrapeTimeSlots);
+router.post("/scrape/", scrapeTimeSlots);
+router.post("/submit/", submitTimeSlots);
 
 export default router;

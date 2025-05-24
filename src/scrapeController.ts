@@ -1,6 +1,7 @@
 import { Request, Response } from "express";
 import { getBrowser } from "./browser.js";
 import bcrypt from "bcrypt";
+import fs from "fs";
 import { Timeslot, WeekResult } from "./utils.js";
 
 /**
@@ -17,6 +18,7 @@ import { Timeslot, WeekResult } from "./utils.js";
 export const scrapeTimeSlots = async (req: Request, res: Response): Promise<void> => {
     const { PASSWORD: envHash, URL: url } = process.env;
     const clientPassword = req.cookies.password;
+    const clientEmail = req.cookies.email;
 
     if (!url) {
         res.status(500).json({ error: "URL is not set in .env file" });
@@ -46,9 +48,10 @@ export const scrapeTimeSlots = async (req: Request, res: Response): Promise<void
 
     const results: WeekResult[] = await Promise.all(
         Object.entries(weeks).map(async ([weekNumber, weekLink]) => {
-            const timeslots = await scrapeWeek(weekLink, clientPassword);
+            const timeslots = await scrapeWeek(weekLink, clientPassword, clientEmail);
             return {
                 link: weekLink,
+                editLink: await getEditLink(weekLink, clientEmail),
                 weekNumber: parseInt(weekNumber),
                 timeslots,
             } satisfies WeekResult;
@@ -64,6 +67,7 @@ export const scrapeTimeSlots = async (req: Request, res: Response): Promise<void
 const scrapeWeek = async (
     weekURL: string,
     password: string,
+    clientEmail: string
 ): Promise<Timeslot[]> => {
     // open new page and navigate to the week URL
     const browser = await getBrowser();
@@ -75,28 +79,115 @@ const scrapeWeek = async (
     if (passwordInput) {
         await page.type("#password", password);
         await page.click(".btn-success");
-        await page.waitForSelector(".results");
+        await page.waitForSelector("table.results");
     }
 
-    // id, datetime, available, selected
-    const timeslots: Timeslot[] = [];
+    // extract timeslot headers and datetime from the table head
+    const timeslots = await page.$$eval("table.results thead th", (headers) => {
+        return Array.from(headers)
+            .map((header) => {
+                const id = header.getAttribute("id");
+                const title = header.getAttribute("title");
+                if (!id || !title) return null;
+                return {
+                    id,
+                    datetime: title,
+                    available: false,
+                    selected: false,
+                };
+            })
+            .filter(Boolean);
+    });
 
-    // Extract all headers with IDs and titles
-    await page.$$eval(".results thead th"
+    // extract timeslot availability from the table body
+    const updatedTimeslots = await page.$$eval(
+        "table.results tbody td",
+        (cells, slots) => {
+            return slots.map((slot) => {
+                const cell = Array.from(cells).find((c) => c.getAttribute("headers") === slot.id);
+                if (!cell) return slot;
+                const isAvailable = cell.querySelector("li.yes") !== null;
+                return {
+                    ...slot,
+                    available: isAvailable,
+                };
+            });
+        },
+        timeslots // pass to browser context
+    );
 
-        // returns all the slots that are taken
-        await page.$$eval(".results tbody td",
+    const selectedTimeslots = await getSelectedTimeslots(weekURL, password, clientEmail);
 
+    const updatedTimeslotsWithSelection = updatedTimeslots.map((slot) => {
+        if (selectedTimeslots && selectedTimeslots.includes(slot.id)) {
+            return { ...slot, selected: true };
+        }
+        return slot;
+    });
 
-
-        await page.close();
-    return slots;
+    await page.close();
+    return updatedTimeslotsWithSelection;
 };
 
-const getSelectedTimeslots = async (weekURL: string): Promise<boolean[]> => {
-    return null;
-}
+const getEditLink = async (weekURL: string, clientEmail: string): Promise<string | null> => {
+    const filename = weekURL.split("/").pop();
 
+    if (!filename) {
+        console.error("Invalid week URL:", weekURL);
+        return null;
+    }
+
+    const editLinksJSON: string = await fs.promises.readFile(`./links/${filename}.json`, "utf8").catch((err) => {
+        console.error("Error reading file:", err);
+        return null;
+    });
+
+    const editLinks = JSON.parse(editLinksJSON || "{}");
+    const editLink = editLinks[clientEmail];
+
+    if (!editLink) {
+        console.error("No edit link found for email:", clientEmail);
+        return null;
+    }
+
+    return editLink;
+};
+
+const getSelectedTimeslots = async (weekURL: string, password: string, clientEmail: string): Promise<string[]> => {
+    const editLink = await getEditLink(weekURL, clientEmail);
+
+    if (!editLink) {
+        console.error("No edit link found for email:", clientEmail);
+        return [];
+    }
+
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    await page.goto(editLink);
+
+    // type password if input is present
+    const passwordInput = await page.$("#password");
+    if (passwordInput) {
+        await page.type("#password", password);
+        await page.click(".btn-success");
+        await page.waitForSelector("table.results");
+    }
+
+    const selectedTimeslots = await page.$$eval("table.results tbody td", (cells) => {
+        return cells
+            .map((cell) => {
+                const header = cell.getAttribute("headers");
+                const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
+                const isChecked = yesInput?.checked === true;
+                return isChecked && header ? header : null;
+            })
+            .filter(Boolean);
+    });
+    console.log("Selected timeslots:", selectedTimeslots);
+
+    await page.close();
+    return selectedTimeslots;
+};
 
 const getWeeks = async (url: string): Promise<Record<number, string>> => {
     // goto main url and wait for the page to load
@@ -120,14 +211,14 @@ const getWeeks = async (url: string): Promise<Record<number, string>> => {
             const weekLinks = elements
                 .map((el) => {
                     const href = el.getAttribute("href");
-                    const title = el.getAttribute("title");
                     const innerhtml = el.innerHTML;
-                    return { href, title, innerhtml };
+                    return { href, innerhtml };
                 })
                 .filter(
-                    ({ href, title }) =>
-                        href?.includes("terminplaner") &&
-                        title?.includes("Zur Trainingsanmeldung"),
+                    ({ href }) =>
+                        // https://terminplaner4.dfn.de/AZaz09AAZZaazz09
+                        href !== null &&
+                        href?.match(/^https:\/\/terminplaner4\.dfn\.de\/([A-Za-z0-9]*)$/) !== null
                 );
 
             weekLinks.forEach(({ href, innerhtml }) => {
@@ -140,4 +231,36 @@ const getWeeks = async (url: string): Promise<Record<number, string>> => {
     );
     page.close();
     return weeks;
-}
+};
+
+export const submitTimeSlots = async (req: Request, res: Response): Promise<void> => {
+    const { PASSWORD: envHash, URL: url } = process.env;
+    const clientPassword = req.cookies.password;
+    const clientEmail = req.cookies.email;
+
+    if (!url) {
+        res.status(500).json({ error: "URL is not set in .env file" });
+        return;
+    }
+
+    if (!clientPassword) {
+        res.status(400).json({ error: "Password is missing" });
+        return;
+    }
+
+    const correctPassword = await bcrypt.compare(clientPassword, envHash);
+
+    if (!correctPassword) {
+        res.status(403).json({ error: "Password is incorrect" });
+        return;
+    }
+
+    const { weekLink, ids } = req.body as { weekLink: string; ids: string[] };
+
+    if (!weekLink || !ids || ids.length === 0) {
+        res.status(400).json({ error: "Week link or timeslot IDs are missing" });
+        return;
+    }
+
+    // TODO: implement input of credentials and selected timeslots
+};

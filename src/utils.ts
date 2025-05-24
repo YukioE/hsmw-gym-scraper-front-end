@@ -14,9 +14,13 @@ export function $$<T extends HTMLElement = HTMLElement>(selector: string): T[] {
     return [...elements];
 }
 
-export function setCookie(cname: string, cvalue: string) {
+export function setCookie(cname: string, cvalue: string, expiration?: Date) {
     const d = new Date();
-    d.setFullYear(d.getFullYear() + 100);
+    if (expiration) {
+        d.setTime(expiration.getTime());
+    } else {
+        d.setFullYear(d.getFullYear() + 100);
+    }
     const expires = "expires=" + d.toUTCString();
     document.cookie =
         cname + "=" + encodeURIComponent(cvalue) + ";" + expires + ";path=/";
@@ -47,6 +51,7 @@ export interface Timeslot {
 
 export interface WeekResult {
     link: string;
+    editLink?: string;
     weekNumber: number;
     timeslots: Timeslot[];
 }
