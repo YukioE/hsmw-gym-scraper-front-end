@@ -1,3 +1,5 @@
+import { Page } from "puppeteer";
+
 export function $<T extends HTMLElement = HTMLElement>(selector: string): T {
     const element = document.querySelector<T>(selector);
     if (!element) {
@@ -54,4 +56,13 @@ export interface WeekResult {
     editLink?: string;
     weekNumber: number;
     timeslots: Timeslot[];
+}
+
+export const typePassword = async (page: Page, password: string): Promise<void> => {
+    const passwordInput = await page.$("#password");
+    if (passwordInput) {
+        await page.type("#password", password);
+        await page.click(".btn-success");
+        await page.waitForSelector("table.results");
+    }
 }

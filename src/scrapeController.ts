@@ -2,7 +2,10 @@ import { Request, Response } from "express";
 import { getBrowser } from "./browser.js";
 import bcrypt from "bcrypt";
 import fs from "fs";
-import { Timeslot, WeekResult } from "./utils.js";
+import path from "path";
+import { Timeslot, typePassword, WeekResult } from "./utils.js";
+import { Page } from "puppeteer";
+import { fileURLToPath } from "url";
 
 /**
  * api route to scrape the time slots
@@ -75,12 +78,7 @@ const scrapeWeek = async (
     await page.goto(weekURL);
 
     // type password if input is present
-    const passwordInput = await page.$("#password");
-    if (passwordInput) {
-        await page.type("#password", password);
-        await page.click(".btn-success");
-        await page.waitForSelector("table.results");
-    }
+    await typePassword(page, password);
 
     // extract timeslot headers and datetime from the table head
     const timeslots = await page.$$eval("table.results thead th", (headers) => {
@@ -137,7 +135,13 @@ const getEditLink = async (weekURL: string, clientEmail: string): Promise<string
         return null;
     }
 
-    const editLinksJSON: string = await fs.promises.readFile(`./links/${filename}.json`, "utf8").catch((err) => {
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+
+    const linksDir = path.join(__dirname, "links");
+    const filePath = path.join(linksDir, `${filename}.json`);
+
+    const editLinksJSON: string = await fs.promises.readFile(filePath, "utf8").catch((err) => {
         console.error("Error reading file:", err);
         return null;
     });
@@ -153,7 +157,38 @@ const getEditLink = async (weekURL: string, clientEmail: string): Promise<string
     return editLink;
 };
 
-const getSelectedTimeslots = async (weekURL: string, password: string, clientEmail: string): Promise<string[]> => {
+const saveEditLink = async (weekURL: string, clientEmail: string, editLink: string): Promise<void> => {
+    const filename = weekURL.split("/").pop();
+
+    if (!filename) {
+        console.error("Invalid week URL:", weekURL);
+        return;
+    }
+
+    const __filename = fileURLToPath(import.meta.url);
+    const __dirname = path.dirname(__filename);
+
+    const linksDir = path.join(__dirname, "links");
+    await fs.promises.mkdir(linksDir, { recursive: true });
+
+    // read existing edit links or create a new object
+    let editLinks: Record<string, string> = {};
+    const filePath = path.join(linksDir, `${filename}.json`);
+    try {
+        const data = await fs.promises.readFile(filePath, "utf8");
+        editLinks = JSON.parse(data);
+    } catch (err) {
+        console.warn("No existing edit links found, creating a new file.");
+    }
+
+    // update the edit link for the client email
+    editLinks[clientEmail] = editLink;
+
+    // write the updated edit links back to the file
+    await fs.promises.writeFile(filePath, JSON.stringify(editLinks, null, 2), "utf8");
+};
+
+const getSelectedTimeslots = async (weekURL: string, password: string, clientEmail: string, page?: Page): Promise<string[]> => {
     const editLink = await getEditLink(weekURL, clientEmail);
 
     if (!editLink) {
@@ -162,17 +197,17 @@ const getSelectedTimeslots = async (weekURL: string, password: string, clientEma
     }
 
     const browser = await getBrowser();
-    const page = await browser.newPage();
-    await page.goto(editLink);
-
-    // type password if input is present
-    const passwordInput = await page.$("#password");
-    if (passwordInput) {
-        await page.type("#password", password);
-        await page.click(".btn-success");
-        await page.waitForSelector("table.results");
+    let ownPage = false;
+    if (!page) {
+        page = await browser.newPage();
+        ownPage = true;
+        await page.goto(editLink);
     }
 
+    // type password if input is present
+    await typePassword(page, password);
+
+    // get all selected timeslot ids from the table ("C0", "C1", etc.)
     const selectedTimeslots = await page.$$eval("table.results tbody td", (cells) => {
         return cells
             .map((cell) => {
@@ -183,9 +218,11 @@ const getSelectedTimeslots = async (weekURL: string, password: string, clientEma
             })
             .filter(Boolean);
     });
-    console.log("Selected timeslots:", selectedTimeslots);
 
-    await page.close();
+    if (ownPage) {
+        await page.close();
+    }
+
     return selectedTimeslots;
 };
 
@@ -236,7 +273,13 @@ const getWeeks = async (url: string): Promise<Record<number, string>> => {
 export const submitTimeSlots = async (req: Request, res: Response): Promise<void> => {
     const { PASSWORD: envHash, URL: url } = process.env;
     const clientPassword = req.cookies.password;
+    const clientUsername = req.cookies.username;
     const clientEmail = req.cookies.email;
+
+    if (!clientUsername || !clientEmail) {
+        res.status(400).json({ error: "Username or email is missing" });
+        return;
+    }
 
     if (!url) {
         res.status(500).json({ error: "URL is not set in .env file" });
@@ -262,5 +305,116 @@ export const submitTimeSlots = async (req: Request, res: Response): Promise<void
         return;
     }
 
-    // TODO: implement input of credentials and selected timeslots
+    const editLink = await getEditLink(weekLink, clientEmail);
+
+    if (editLink) {
+        await submitTimeslotsEditLink(weekLink, editLink, ids, clientPassword, clientEmail);
+    } else {
+        await submitTimeslotsNormal(weekLink, ids, clientUsername, clientEmail, clientPassword);
+    }
+
+    res.status(200).json({ message: "Timeslots submitted successfully" });
+    return;
+};
+
+const submitTimeslotsNormal = async (weekLink: string, ids: string[], clientUsername: string, clientEmail: string, password: string): Promise<void> => {
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    await page.goto(weekLink);
+
+    await typePassword(page, password);
+
+    // select the new timeslots with the given ids
+    await page.$$eval("table.results tbody td", (cells, ids) => {
+        cells.forEach((cell) => {
+            const header = cell.getAttribute("headers");
+            if (header && ids.includes(header)) {
+                const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
+                if (yesInput) yesInput.setAttribute("checked", "");
+            }
+        });
+    }, ids);
+
+    const usernameInput = await page.$("#name");
+    const emailInput = await page.$("#mail");
+
+    if (usernameInput && emailInput) {
+        await usernameInput.type(clientUsername);
+        await emailInput.type(clientEmail);
+    }
+
+    const submitButton = await page.$("table.results button[name='save']");
+    if (submitButton) {
+        await submitButton.click();
+        await page.waitForNavigation({ waitUntil: "networkidle0" });
+        console.log("Timeslots submitted successfully");
+    } else {
+        console.error("Submit button not found on edit link page");
+    }
+
+    const editLinkInput = await page.$("#email");
+    const editLinkSubmitButton = await page.$("#send_edit_link_submit");
+    const editLink = await page.$eval(".alert-success div.input-group.input-group-sm input.form-control", (input) => (input as HTMLInputElement).value.trim());
+
+    if (editLinkInput && editLinkSubmitButton) {
+        await editLinkInput.type(clientEmail);
+        await editLinkSubmitButton.click();
+    }
+
+    await saveEditLink(weekLink, clientEmail, editLink);
+
+    await page.close();
+};
+
+const submitTimeslotsEditLink = async (weekLink: string, editLink: string, ids: string[], password: string, clientEmail: string): Promise<void> => {
+    const browser = await getBrowser();
+    const page = await browser.newPage();
+    await page.goto(editLink);
+
+    await typePassword(page, password);
+
+    const selectedIDs = await getSelectedTimeslots(weekLink, password, clientEmail, page);
+
+    // deselect all selected timeslots
+    await page.$$eval("table.results tbody td", (cells, selectedIDs) => {
+        cells.forEach((cell) => {
+            const header = cell.getAttribute("headers");
+            if (header && selectedIDs.includes(header)) {
+                cell.querySelector("li.yes input[type=radio]")?.removeAttribute("checked");
+            }
+        });
+    }, selectedIDs);
+
+    const submitButton = await page.$("table.results button[name='save']");
+    if (submitButton) {
+        await submitButton.click();
+        await page.waitForNavigation({ waitUntil: "networkidle0" });
+    } else {
+        console.error("Submit button not found on edit link page");
+    }
+
+    // reload the page to ensure the changes are applied
+    await page.goto(editLink);
+    await typePassword(page, password);
+
+    // select the new timeslots with the given ids
+    await page.$$eval("table.results tbody td", (cells, ids) => {
+        cells.forEach((cell) => {
+            const header = cell.getAttribute("headers");
+            if (header && ids.includes(header)) {
+                const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
+                if (yesInput) yesInput.setAttribute("checked", "");
+            }
+        });
+    }, ids);
+
+    const newSubmitButton = await page.$("table.results .btn-edit .btn-success");
+    if (newSubmitButton) {
+        await newSubmitButton.click();
+        await page.waitForNavigation({ waitUntil: "networkidle0" });
+    } else {
+        console.error("Submit button not found on edit link page");
+    }
+
+    await page.close();
 };

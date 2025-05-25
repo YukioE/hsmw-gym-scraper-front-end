@@ -31,10 +31,10 @@ export class UIManager {
             const email = emailInput.value;
             const password = passwordInput.value;
 
-            if (!email.includes("hs-mittweida")) {
-                alert("Please use your hs-mittweida email address.");
-                return;
-            }
+            // if (!email.includes("hs-mittweida")) {
+            //     alert("Please use your hs-mittweida email address.");
+            //     return;
+            // }
 
             setCookie("username", username);
             setCookie("email", email);
@@ -196,9 +196,7 @@ export class UIManager {
                 return;
             }
 
-            const selectedTimeslots = selectedSlots.map((slot) => ({
-                id: slot.id,
-            }));
+            const ids = selectedSlots.map((slot) => slot.id);
 
             // TODO: send post request to server on /submit with selectedTimeslots id array
             button.innerHTML = "Submitting...";
@@ -207,7 +205,7 @@ export class UIManager {
                 headers: {
                     "Content-Type": "application/json",
                 },
-                body: JSON.stringify({ ids: selectedTimeslots }),
+                body: JSON.stringify({ weekLink: $(".week-link").textContent?.trim() || "", ids }),
             };
 
             const response = await fetch("/submit/", fetchOptions);
