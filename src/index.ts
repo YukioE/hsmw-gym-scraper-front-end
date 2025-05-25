@@ -3,6 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import routes from "./routes.js";
 import cookieParser from "cookie-parser";
+import rateLimit from "express-rate-limit";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -10,6 +11,16 @@ const __dirname = path.dirname(__filename);
 const app = express();
 const port = process.env.PORT || 3000;
 
+const limiter = rateLimit({
+    windowMs: 10 * 60 * 1000, // 10 minutes
+    max: 100, // limit each IP to 100 requests per windowMs
+    message: "Too many requests, please try again later.",
+    skip(req, res) {
+        return req.ip === "127.0.0.1";
+    },
+});
+
+app.use(limiter);
 app.use(express.static(__dirname));
 app.use(cookieParser());
 app.use(express.json());
