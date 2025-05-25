@@ -1,3 +1,158 @@
 .hidden {
     display: none;
 }
+
+/* Global Reset & Fonts */
+body {
+    margin: 0;
+    padding: 0;
+    font-family: "Segoe UI", sans-serif;
+    background-color: #f4f4f4;
+    color: #333;
+}
+
+h1 {
+    text-align: center;
+    margin-top: 2rem;
+}
+
+/* Login Form */
+.login-form {
+    max-width: 400px;
+    margin: 2rem auto;
+    padding: 2rem;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.login-form input,
+.login-form button {
+    padding: 10px;
+    font-size: 1rem;
+    border: 1px solid #ccc;
+    border-radius: 5px;
+}
+
+.login-form button {
+    cursor: pointer;
+    background-color: #0077cc;
+    color: white;
+    border: none;
+    transition: background 0.3s ease;
+}
+
+.login-form button:hover {
+    background-color: #005fa3;
+}
+
+/* App Container */
+.app-container {
+    max-width: 800px;
+    margin: 2rem auto;
+    padding: 1rem;
+    background: white;
+    border-radius: 10px;
+    box-shadow: 0 0 10px rgba(0, 0, 0, 0.05);
+}
+
+.week-select {
+    width: 100%;
+    padding: 0.5rem;
+    font-size: 1rem;
+    margin-bottom: 1.5rem;
+    border-radius: 5px;
+    border: 1px solid #ccc;
+}
+
+/* Timeslots */
+.timeslot-container {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.timeslot {
+    gap: 0.5rem;
+    padding: 0.5rem;
+    white-space: nowrap;
+    overflow: hidden;
+}
+
+.timeslot input[type="checkbox"] {
+    transform: scale(1.2);
+}
+
+.timeslot input[type="checkbox"]:checked+label {
+    background-color: #cce5ff;
+    border-left: 5px solid #007bff;
+    padding-left: 10px;
+    border-radius: 4px;
+    font-weight: bold;
+}
+
+.timeslot label {
+    font-size: 1rem;
+    flex-shrink: 0;
+}
+
+/* Divider between days */
+.timeslot-container hr {
+    border: none;
+    border-top: 1px solid #ddd;
+    margin: 1rem 0;
+}
+
+.timeslot input[type="checkbox"]:disabled {
+    cursor: not-allowed;
+}
+
+.timeslot input[type="checkbox"]:disabled+label {
+    color: #aaa;
+    cursor: not-allowed;
+    text-decoration: line-through;
+    opacity: 0.6;
+}
+
+/* Buttons */
+button.update,
+button.submit-selection,
+#logout-button {
+    padding: 0.75rem 1.25rem;
+    margin: 1rem 0.5rem 0 0;
+    font-size: 1rem;
+    border: none;
+    background-color: #28a745;
+    color: white;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+button.update:hover,
+button.submit-selection:hover,
+#logout-button:hover {
+    background-color: #218838;
+}
+
+/* Hidden Utility Class */
+.hidden {
+    display: none !important;
+}
+
+/* Responsive */
+@media (max-width: 600px) {
+
+    .login-form,
+    .app-container {
+        margin: 1rem;
+        padding: 1rem;
+    }
+
+    .timeslot {
+        flex-direction: column;
+        align-items: flex-start;
+    }
+}

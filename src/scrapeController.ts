@@ -150,7 +150,6 @@ const getEditLink = async (weekURL: string, clientEmail: string): Promise<string
     const editLink = editLinks[clientEmail];
 
     if (!editLink) {
-        console.error("No edit link found for email:", clientEmail);
         return null;
     }
 
@@ -192,7 +191,6 @@ const getSelectedTimeslots = async (weekURL: string, password: string, clientEma
     const editLink = await getEditLink(weekURL, clientEmail);
 
     if (!editLink) {
-        console.error("No edit link found for email:", clientEmail);
         return [];
     }
 
