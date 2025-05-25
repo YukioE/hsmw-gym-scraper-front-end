@@ -9,23 +9,24 @@
 </head>
 
 <body>
-    <div class="app-container">
-        <h1>HSMW Gym</h1>
-        <form action="/login" method="POST" class="login-form">
-            <label for="username">Username:</label>
-            <input type="text" id="username" name="username" placeholder="Username" required />
-            <label for="email">Email:</label>
-            <input type="email" id="email" name="email" placeholder="Email" required />
-            <label for="password">Password:</label>
-            <input type="password" id="password" name="password" placeholder="Password" required />
-            <button type="submit" id="submit-button">login</button>
-            <button type="button" class="hidden" id="logout-button">
-                logout
-            </button>
-        </form>
+    <h1>HSMW Gym</h1>
+    <form action="/login" method="POST" class="login-form">
+        <label for="username">Username:</label>
+        <input type="text" id="username" name="username" placeholder="Username" required />
+        <label for="email">Email:</label>
+        <input type="email" id="email" name="email" placeholder="Email" required />
+        <label for="password">Password:</label>
+        <input type="password" id="password" name="password" placeholder="Password" required />
+        <button type="submit" id="submit-button">login</button>
+        <button type="button" class="hidden" id="logout-button">
+            logout
+        </button>
+    </form>
 
+    <div class="app-container hidden">
         <select class="week-select"></select>
         <div class="weeks-container"></div>
+        <button type="button" class="update">update data</button>
         <button type="button" class="submit-selection">Submit</button>
     </div>
     <script type="module" src="./app.js"></script>

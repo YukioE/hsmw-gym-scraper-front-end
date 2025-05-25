@@ -9,8 +9,8 @@ export class UIManager {
         this.autoLogin();
         this.initLoginForm();
         this.initLogoutButton();
-        this.scrapeTimeSlots();
         this.initSubmitSelectionButton();
+        this.initUpdateButton();
     }
 
     private initLoginForm() {
@@ -20,6 +20,7 @@ export class UIManager {
         const passwordInput = $<HTMLInputElement>("#password");
         const submitButton = $<HTMLButtonElement>("#submit-button");
         const logoutButton = $<HTMLButtonElement>("#logout-button");
+        const appContainer = $<HTMLDivElement>(".app-container");
 
         submitButton.addEventListener("click", async (event) => {
             if (!loginForm.checkValidity()) {
@@ -47,12 +48,17 @@ export class UIManager {
             logoutButton.classList.remove("hidden");
             usernameInput.classList.remove("hidden");
             usernameInput.readOnly = true;
+
+            appContainer.classList.remove("hidden");
+
+            this.scrapeTimeSlots();
         });
     }
 
     private autoLogin() {
         const username = getCookie("username");
         const email = getCookie("email");
+        const password = getCookie("password");
 
         if (username && email) {
             const usernameInput = $<HTMLInputElement>("#username");
@@ -60,6 +66,10 @@ export class UIManager {
 
             usernameInput.value = username;
             emailInput.value = email;
+        }
+        if (password) {
+            const passwordInput = $<HTMLInputElement>("#password");
+            passwordInput.value = password;
         }
     }
 
@@ -69,6 +79,7 @@ export class UIManager {
         const usernameInput = $<HTMLInputElement>("#username");
         const emailInput = $<HTMLInputElement>("#email");
         const passwordInput = $<HTMLInputElement>("#password");
+        const appContainer = $<HTMLDivElement>(".app-container");
 
         logoutButton.addEventListener("click", () => {
             [...loginForm.children].forEach((child) => {
@@ -81,6 +92,7 @@ export class UIManager {
             passwordInput.value = "";
 
             logoutButton.classList.add("hidden");
+            appContainer.classList.add("hidden");
 
             setCookie("username", "");
             setCookie("email", "");
@@ -88,61 +100,62 @@ export class UIManager {
         });
     }
 
-    private scrapeTimeSlots() {
-        const button = document.createElement("button");
+    private initUpdateButton() {
+        const updateButton = $<HTMLButtonElement>(".update");
+        updateButton.addEventListener("click", async () => {
+            await this.scrapeTimeSlots();
+        });
+    }
+
+    private async scrapeTimeSlots() {
         const output = $<HTMLDivElement>(".weeks-container");
-        button.textContent = "Scrape Data";
 
-        button.addEventListener("click", async () => {
-            output.innerHTML = "scraping...";
-            const fetchOptions = {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-            };
+        output.innerHTML = "fetching data...";
+        const fetchOptions = {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+            },
+        };
 
-            const response = await fetch("/scrape/", fetchOptions);
+        const response = await fetch("/scrape/", fetchOptions);
 
-            if (!response.ok) {
-                output.innerHTML = "Error: " + response.statusText;
-                return;
-            }
+        if (!response.ok) {
+            output.innerHTML = "Error: " + response.statusText;
+            return;
+        }
 
-            const data = (await response.json()) as WeekResult[];
+        const data = (await response.json()) as WeekResult[];
 
-            if (data.length === 0) {
-                output.innerHTML = "No weeks found.";
-                return;
-            }
+        if (data.length === 0) {
+            output.innerHTML = "No weeks found.";
+            return;
+        }
 
-            // create week select options
-            const weekSelect = $<HTMLSelectElement>(".week-select");
-            weekSelect.innerHTML = "";
-            data.forEach((week) => {
-                // TODO: start and end dates
-                const option = document.createElement("option");
-                option.value = week.link.split("/").pop() || "";
-                option.textContent = `Week ${week.weekNumber}`;
-                weekSelect.appendChild(option);
-            });
-
-            // add event listener to week select, call populateWeekContainer on change
-            weekSelect.addEventListener("change", (event) => {
-                const selectedWeek = (event.target as HTMLSelectElement).value;
-                output.innerHTML = "";
-                const weekData = data.find((week) => week.link.endsWith(selectedWeek));
-                if (weekData) {
-                    this.populateWeekContainer(weekData);
-                } else {
-                    output.innerHTML = "No data found for the selected week.";
-                }
-            });
-
-            weekSelect.dispatchEvent(new Event("change"));
+        // create week select options
+        const weekSelect = $<HTMLSelectElement>(".week-select");
+        weekSelect.innerHTML = "";
+        data.forEach((week) => {
+            // TODO: start and end dates
+            const option = document.createElement("option");
+            option.value = week.link.split("/").pop() || "";
+            option.textContent = `Week ${week.weekNumber}`;
+            weekSelect.appendChild(option);
         });
 
-        output.after(button);
+        // add event listener to week select, call populateWeekContainer on change
+        weekSelect.addEventListener("change", (event) => {
+            const selectedWeek = (event.target as HTMLSelectElement).value;
+            output.innerHTML = "";
+            const weekData = data.find((week) => week.link.endsWith(selectedWeek));
+            if (weekData) {
+                this.populateWeekContainer(weekData);
+            } else {
+                output.innerHTML = "No data found for the selected week.";
+            }
+        });
+
+        weekSelect.dispatchEvent(new Event("change"));
     }
 
     private populateWeekContainer(data: WeekResult) {
@@ -155,16 +168,18 @@ export class UIManager {
         output.appendChild(link);
 
         // output the current edit link if it exists
-        const editLink = document.createElement("div");
-        editLink.className = "edit-link";
-        editLink.innerHTML = `<p>Link: <a href="${data.editLink}" target="_blank">${data.editLink}</a></p>`;
-        output.appendChild(editLink);
+        if (data.editLink) {
+            const editLink = document.createElement("div");
+            editLink.className = "edit-link";
+            editLink.innerHTML = `<p>Link: <a href="${data.editLink}" target="_blank">${data.editLink}</a></p>`;
+            output.appendChild(editLink);
+        }
 
         const timeslotContainer = document.createElement("div");
         timeslotContainer.className = "timeslot-container";
 
         // create checkboxes for each timeslot
-        data.timeslots.forEach((slot) => {
+        data.timeslots.forEach((slot, i) => {
             const slotDiv = document.createElement("div");
             slotDiv.className = "timeslot";
 
@@ -181,6 +196,16 @@ export class UIManager {
             slotDiv.appendChild(checkbox);
             slotDiv.appendChild(label);
             timeslotContainer.appendChild(slotDiv);
+
+            // append hr tag if the day changes
+            const currentDay = slot.datetime.slice(0, 2);
+            const nextSlot = data.timeslots[i + 1];
+            const nextDay = nextSlot ? nextSlot.datetime.slice(0, 2) : null;
+
+            if (currentDay !== nextDay) {
+                const hr = document.createElement("hr");
+                timeslotContainer.appendChild(hr);
+            }
         });
 
         output.appendChild(timeslotContainer);
@@ -198,7 +223,6 @@ export class UIManager {
 
             const ids = selectedSlots.map((slot) => slot.id);
 
-            // TODO: send post request to server on /submit with selectedTimeslots id array
             button.innerHTML = "Submitting...";
             const fetchOptions = {
                 method: "POST",
