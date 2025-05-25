@@ -215,11 +215,7 @@ export class UIManager {
         const button = $<HTMLButtonElement>(".submit-selection");
 
         button.addEventListener("click", async () => {
-            const selectedSlots = $$(".timeslot input[type='checkbox']:checked");
-            if (selectedSlots.length === 0) {
-                alert("Please select at least one timeslot.");
-                return;
-            }
+            let selectedSlots = $$(".timeslot input[type='checkbox']:checked") || [];
 
             const ids = selectedSlots.map((slot) => slot.id);
 

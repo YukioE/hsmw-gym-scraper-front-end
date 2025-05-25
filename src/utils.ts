@@ -11,7 +11,7 @@ export function $<T extends HTMLElement = HTMLElement>(selector: string): T {
 export function $$<T extends HTMLElement = HTMLElement>(selector: string): T[] {
     const elements = document.querySelectorAll<T>(selector);
     if (elements.length === 0) {
-        throw new Error(`No elements found for selector: ${selector}`);
+        return [];
     }
     return [...elements];
 }

@@ -298,7 +298,7 @@ export const submitTimeSlots = async (req: Request, res: Response): Promise<void
 
     const { weekLink, ids } = req.body as { weekLink: string; ids: string[] };
 
-    if (!weekLink || !ids || ids.length === 0) {
+    if (!weekLink || !ids) {
         res.status(400).json({ error: "Week link or timeslot IDs are missing" });
         return;
     }
