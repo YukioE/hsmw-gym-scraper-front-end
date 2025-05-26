@@ -274,16 +274,6 @@ const getWeeks = async (url: string): Promise<Record<number, string>> => {
     try {
         await page.goto(url);
 
-        // Check if cookie banner is present and visible
-        const cookieBanner = await page.$("#privacySettingsModal");
-        if (cookieBanner && !(await cookieBanner.boxModel())) {
-            try {
-                await page.click("#hsmwPrivacyAcceptAllButton");
-            } catch (clickErr) {
-                console.warn("Failed to click cookie banner:", clickErr);
-            }
-        }
-
         await page.waitForSelector(".hsmw-main");
 
         const weeks: Record<number, string> = await page.$$eval(
