@@ -6,9 +6,9 @@
   "type": "module",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "start": "tsc && npm run copy && node --env-file=.env dist/index.js",
+    "start": "tsc && npm run copy && node dist/index.js",
     "copy": "copyfiles -u 1 src/**/*.html dist && copyfiles -u 1 src/**/*.css dist",
-    "dev": "nodemon -e ts,html,css --exec \"tsc && npm run copy && node --env-file=.env dist/index.js\""
+    "dev": "nodemon -e ts,html,css --exec \"tsc && npm run copy && node dist/index.js\""
   },
   "repository": {
     "type": "git",
@@ -24,18 +24,20 @@
   "devDependencies": {
     "@types/bcrypt": "^5.0.2",
     "@types/cookie-parser": "^1.4.8",
+    "@types/dotenv": "^6.1.1",
     "@types/express": "^5.0.1",
     "@types/express-rate-limit": "^5.1.3",
     "@types/node": "^22.15.17",
     "@types/puppeteer": "^5.4.7",
     "@types/typescript": "^0.4.29",
+    "@types/helmet": "^0.0.48",
     "copyfiles": "^2.4.1",
     "nodemon": "^3.1.10"
   },
   "dependencies": {
-    "@types/helmet": "^0.0.48",
     "bcrypt": "^6.0.0",
     "cookie-parser": "^1.4.7",
+    "dotenv": "^16.5.0",
     "express": "^5.1.0",
     "express-rate-limit": "^7.5.0",
     "helmet": "^8.1.0",
