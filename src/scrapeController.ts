@@ -72,91 +72,114 @@ const scrapeWeek = async (
     password: string,
     clientEmail: string
 ): Promise<Timeslot[]> => {
-    // open new page and navigate to the week URL
     const browser = await getBrowser();
     const page = await browser.newPage();
-    await page.goto(weekURL);
 
-    // type password if input is present
-    await typePassword(page, password);
+    try {
+        await page.goto(weekURL, { waitUntil: "networkidle2", timeout: 10000 });
 
-    // extract timeslot headers and datetime from the table head
-    const timeslots = await page.$$eval("table.results thead th", (headers) => {
-        return Array.from(headers)
-            .map((header) => {
-                const id = header.getAttribute("id");
-                const title = header.getAttribute("title");
-                if (!id || !title) return null;
-                return {
-                    id,
-                    datetime: title,
-                    available: false,
-                    selected: false,
-                };
-            })
-            .filter(Boolean);
-    });
+        await typePassword(page, password);
 
-    // extract timeslot availability from the table body
-    const updatedTimeslots = await page.$$eval(
-        "table.results tbody td",
-        (cells, slots) => {
-            return slots.map((slot) => {
-                const cell = Array.from(cells).find((c) => c.getAttribute("headers") === slot.id);
-                if (!cell) return slot;
-                const isAvailable = cell.querySelector("li.yes") !== null;
-                return {
-                    ...slot,
-                    available: isAvailable,
-                };
-            });
-        },
-        timeslots // pass to browser context
-    );
+        // Extract timeslot headers
+        const timeslots = await page.$$eval("table.results thead th", (headers) => {
+            return Array.from(headers)
+                .map((header) => {
+                    const id = header.getAttribute("id");
+                    const title = header.getAttribute("title");
+                    if (!id || !title) return null;
+                    return {
+                        id,
+                        datetime: title,
+                        available: false,
+                        selected: false,
+                    };
+                })
+                .filter(Boolean);
+        });
 
-    const selectedTimeslots = await getSelectedTimeslots(weekURL, password, clientEmail);
+        // Extract availability
+        const updatedTimeslots = await page.$$eval(
+            "table.results tbody td",
+            (cells, slots) => {
+                return slots.map((slot) => {
+                    const cell = Array.from(cells).find((c) => c.getAttribute("headers") === slot.id);
+                    const isAvailable = !!cell?.querySelector("li.yes");
+                    return { ...slot, available: isAvailable };
+                });
+            },
+            timeslots
+        );
 
-    const updatedTimeslotsWithSelection = updatedTimeslots.map((slot) => {
-        if (selectedTimeslots && selectedTimeslots.includes(slot.id)) {
-            return { ...slot, selected: true };
+        // Get selected timeslots
+        const selectedTimeslots = await getSelectedTimeslots(weekURL, password, clientEmail, page);
+
+        // Merge selection info
+        const updatedTimeslotsWithSelection = updatedTimeslots.map((slot) => ({
+            ...slot,
+            selected: selectedTimeslots.includes(slot.id),
+        }));
+
+        return updatedTimeslotsWithSelection;
+    } catch (err) {
+        console.error("scrapeWeek failed:", err);
+        return [];
+    } finally {
+        try {
+            await page.close();
+        } catch (closeErr) {
+            console.warn("Failed to close page:", closeErr);
         }
-        return slot;
-    });
-
-    await page.close();
-    return updatedTimeslotsWithSelection;
+    }
 };
 
 const getEditLink = async (weekURL: string, clientEmail: string): Promise<string | null> => {
-    const filename = weekURL.split("/").pop();
+    try {
+        const filename = weekURL.split("/").pop();
 
-    if (!filename) {
-        console.error("Invalid week URL:", weekURL);
+        if (!filename) {
+            console.error("Invalid week URL (no filename found):", weekURL);
+            return null;
+        }
+
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+
+        const linksDir = path.join(__dirname, "links");
+        const filePath = path.join(linksDir, `${filename}.json`);
+
+        if (!fs.existsSync(filePath)) {
+            console.warn(`Link file does not exist: ${filePath}`);
+            return null;
+        }
+
+        const fileContent = await fs.promises.readFile(filePath, "utf8");
+
+        let editLinks: Record<string, string> = {};
+        try {
+            editLinks = JSON.parse(fileContent);
+        } catch (jsonErr) {
+            console.error("Failed to parse edit link JSON:", jsonErr);
+            return null;
+        }
+
+        const editLink = editLinks[clientEmail];
+        if (!editLink) {
+            console.warn(`No edit link found for email: ${clientEmail}`);
+            return null;
+        }
+
+        return editLink;
+    } catch (err) {
+        console.error("Unhandled error in getEditLink:", err);
         return null;
     }
-
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-
-    const linksDir = path.join(__dirname, "links");
-    const filePath = path.join(linksDir, `${filename}.json`);
-
-    const editLinksJSON: string = await fs.promises.readFile(filePath, "utf8").catch((err) => {
-        console.error("Error reading file:", err);
-        return null;
-    });
-
-    const editLinks = JSON.parse(editLinksJSON || "{}");
-    const editLink = editLinks[clientEmail];
-
-    if (!editLink) {
-        return null;
-    }
-
-    return editLink;
 };
 
-const saveEditLink = async (weekURL: string, clientEmail: string, editLink: string): Promise<void> => {
+const saveEditLink = async (
+    weekURL: string,
+    clientEmail: string,
+    editLink: string
+): Promise<void> => {
     const filename = weekURL.split("/").pop();
 
     if (!filename) {
@@ -164,108 +187,143 @@ const saveEditLink = async (weekURL: string, clientEmail: string, editLink: stri
         return;
     }
 
-    const __filename = fileURLToPath(import.meta.url);
-    const __dirname = path.dirname(__filename);
-
-    const linksDir = path.join(__dirname, "links");
-    await fs.promises.mkdir(linksDir, { recursive: true });
-
-    // read existing edit links or create a new object
-    let editLinks: Record<string, string> = {};
-    const filePath = path.join(linksDir, `${filename}.json`);
     try {
-        const data = await fs.promises.readFile(filePath, "utf8");
-        editLinks = JSON.parse(data);
+        const __filename = fileURLToPath(import.meta.url);
+        const __dirname = path.dirname(__filename);
+
+        const linksDir = path.join(__dirname, "links");
+        await fs.promises.mkdir(linksDir, { recursive: true });
+
+        const filePath = path.join(linksDir, `${filename}.json`);
+
+        // read existing edit links or start with empty object
+        let editLinks: Record<string, string> = {};
+        try {
+            const data = await fs.promises.readFile(filePath, "utf8");
+            editLinks = JSON.parse(data);
+        } catch (err) {
+            // File might not exist or JSON might be invalid
+            console.warn("No existing edit links found or failed to parse, creating a new file.");
+        }
+
+        // update the edit link for the client email
+        editLinks[clientEmail] = editLink;
+
+        // write the updated edit links back to the file
+        await fs.promises.writeFile(filePath, JSON.stringify(editLinks, null, 2), "utf8");
+
     } catch (err) {
-        console.warn("No existing edit links found, creating a new file.");
+        console.error("Error saving edit link:", err);
     }
-
-    // update the edit link for the client email
-    editLinks[clientEmail] = editLink;
-
-    // write the updated edit links back to the file
-    await fs.promises.writeFile(filePath, JSON.stringify(editLinks, null, 2), "utf8");
 };
 
-const getSelectedTimeslots = async (weekURL: string, password: string, clientEmail: string, page?: Page): Promise<string[]> => {
+const getSelectedTimeslots = async (
+    weekURL: string,
+    password: string,
+    clientEmail: string,
+    page?: Page
+): Promise<string[]> => {
     const editLink = await getEditLink(weekURL, clientEmail);
-
     if (!editLink) {
         return [];
     }
 
     const browser = await getBrowser();
     let ownPage = false;
-    if (!page) {
-        page = await browser.newPage();
-        ownPage = true;
-        await page.goto(editLink);
+    let currentPage: Page | undefined = page;
+
+    try {
+        if (!currentPage) {
+            currentPage = await browser.newPage();
+            ownPage = true;
+            await currentPage.goto(editLink);
+        }
+
+        await typePassword(currentPage, password);
+
+        const selectedTimeslots = await currentPage.$$eval("table.results tbody td", (cells) => {
+            return cells
+                .map((cell) => {
+                    const header = cell.getAttribute("headers");
+                    const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
+                    const isChecked = yesInput?.checked === true;
+                    return isChecked && header ? header : null;
+                })
+                .filter(Boolean);
+        });
+
+        return selectedTimeslots as string[];
+    } catch (err) {
+        console.error("Failed to get selected timeslots:", err);
+        return [];
+    } finally {
+        if (ownPage && currentPage) {
+            try {
+                await currentPage.close();
+            } catch (closeErr) {
+                console.warn("Error closing Puppeteer page:", closeErr);
+            }
+        }
     }
-
-    // type password if input is present
-    await typePassword(page, password);
-
-    // get all selected timeslot ids from the table ("C0", "C1", etc.)
-    const selectedTimeslots = await page.$$eval("table.results tbody td", (cells) => {
-        return cells
-            .map((cell) => {
-                const header = cell.getAttribute("headers");
-                const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
-                const isChecked = yesInput?.checked === true;
-                return isChecked && header ? header : null;
-            })
-            .filter(Boolean);
-    });
-
-    if (ownPage) {
-        await page.close();
-    }
-
-    return selectedTimeslots;
 };
 
 const getWeeks = async (url: string): Promise<Record<number, string>> => {
-    // goto main url and wait for the page to load
     const browser = await getBrowser();
     const page = await browser.newPage();
-    await page.goto(url);
 
-    //check if cookie banner is present and accept it
-    const cookieBanner = await page.$("#privacySettingsModal");
-    if (cookieBanner && !cookieBanner.boxModel()) {
-        await page.click("#hsmwPrivacyAcceptAllButton");
+    try {
+        await page.goto(url);
+
+        // Check if cookie banner is present and visible
+        const cookieBanner = await page.$("#privacySettingsModal");
+        if (cookieBanner && !(await cookieBanner.boxModel())) {
+            try {
+                await page.click("#hsmwPrivacyAcceptAllButton");
+            } catch (clickErr) {
+                console.warn("Failed to click cookie banner:", clickErr);
+            }
+        }
+
+        await page.waitForSelector(".hsmw-main");
+
+        const weeks: Record<number, string> = await page.$$eval(
+            ".ext_link",
+            (elements) => {
+                const weeks: Record<number, string> = {};
+                const weekLinks = elements
+                    .map((el) => {
+                        const href = el.getAttribute("href");
+                        const innerhtml = el.innerHTML;
+                        return { href, innerhtml };
+                    })
+                    .filter(
+                        ({ href }) =>
+                            href !== null &&
+                            /^https:\/\/terminplaner4\.dfn\.de\/[A-Za-z0-9]*$/.test(href)
+                    );
+
+                weekLinks.forEach(({ href, innerhtml }) => {
+                    const weekNumber = parseInt(innerhtml.split(" ")[1]);
+                    if (!isNaN(weekNumber)) {
+                        weeks[weekNumber] = href!;
+                    }
+                });
+
+                return weeks;
+            }
+        );
+
+        return weeks;
+    } catch (err) {
+        console.error("Failed to get weeks from page:", err);
+        return {};
+    } finally {
+        try {
+            await page.close();
+        } catch (closeErr) {
+            console.warn("Error closing Puppeteer page:", closeErr);
+        }
     }
-
-    await page.waitForSelector(".hsmw-main");
-
-    // extract the week number and the corresponding link from the page
-    const weeks: Record<number, string> = await page.$$eval(
-        ".ext_link",
-        (elements) => {
-            const weeks: Record<number, string> = {};
-            const weekLinks = elements
-                .map((el) => {
-                    const href = el.getAttribute("href");
-                    const innerhtml = el.innerHTML;
-                    return { href, innerhtml };
-                })
-                .filter(
-                    ({ href }) =>
-                        // https://terminplaner4.dfn.de/AZaz09AAZZaazz09
-                        href !== null &&
-                        href?.match(/^https:\/\/terminplaner4\.dfn\.de\/([A-Za-z0-9]*)$/) !== null
-                );
-
-            weekLinks.forEach(({ href, innerhtml }) => {
-                const weekNumber = parseInt(innerhtml.split(" ")[1]);
-                weeks[weekNumber] = href;
-            });
-
-            return weeks;
-        },
-    );
-    page.close();
-    return weeks;
 };
 
 export const submitTimeSlots = async (req: Request, res: Response): Promise<void> => {
@@ -315,104 +373,149 @@ export const submitTimeSlots = async (req: Request, res: Response): Promise<void
     return;
 };
 
-const submitTimeslotsNormal = async (weekLink: string, ids: string[], clientUsername: string, clientEmail: string, password: string): Promise<void> => {
+const submitTimeslotsNormal = async (
+    weekLink: string,
+    ids: string[],
+    clientUsername: string,
+    clientEmail: string,
+    password: string
+): Promise<void> => {
     const browser = await getBrowser();
     const page = await browser.newPage();
-    await page.goto(weekLink);
 
-    await typePassword(page, password);
+    try {
+        await page.goto(weekLink);
 
-    // select the new timeslots with the given ids
-    await page.$$eval("table.results tbody td", (cells, ids) => {
-        cells.forEach((cell) => {
-            const header = cell.getAttribute("headers");
-            if (header && ids.includes(header)) {
-                const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
-                if (yesInput) yesInput.setAttribute("checked", "");
-            }
-        });
-    }, ids);
+        await typePassword(page, password);
 
-    const usernameInput = await page.$("#name");
-    const emailInput = await page.$("#mail");
+        // Select timeslots
+        await page.$$eval("table.results tbody td", (cells, ids) => {
+            cells.forEach((cell) => {
+                const header = cell.getAttribute("headers");
+                if (header && ids.includes(header)) {
+                    const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
+                    if (yesInput) {
+                        yesInput.setAttribute("checked", "");
+                    }
+                }
+            });
+        }, ids);
 
-    if (usernameInput && emailInput) {
-        await usernameInput.type(clientUsername);
-        await emailInput.type(clientEmail);
+        // Fill in name/email
+        const usernameInput = await page.$("#name");
+        const emailInput = await page.$("#mail");
+        if (usernameInput && emailInput) {
+            await usernameInput.type(clientUsername);
+            await emailInput.type(clientEmail);
+        } else {
+            console.warn("Username or email input not found");
+        }
+
+        // Click submit
+        const submitButton = await page.$("table.results button[name='save']");
+        if (submitButton) {
+            await Promise.all([
+                submitButton.click(),
+                page.waitForNavigation({ waitUntil: "networkidle0", timeout: 10000 }).catch((e) =>
+                    console.warn("Navigation timeout after clicking submit:", e)
+                ),
+            ]);
+            console.log("Timeslots submitted successfully");
+        } else {
+            console.error("Submit button not found");
+        }
+
+        // Try to save the edit link
+        const editLinkInput = await page.$("#email");
+        const editLinkSubmitButton = await page.$("#send_edit_link_submit");
+
+        let editLink: string | null = null;
+        try {
+            editLink = await page.$eval(
+                ".alert-success div.input-group.input-group-sm input.form-control",
+                (input) => (input as HTMLInputElement).value.trim()
+            );
+        } catch (e) {
+            console.warn("Could not extract edit link:", e);
+        }
+
+        if (editLink && editLinkInput && editLinkSubmitButton) {
+            await editLinkInput.type(clientEmail);
+            await editLinkSubmitButton.click();
+            await saveEditLink(weekLink, clientEmail, editLink);
+        } else {
+            console.warn("Missing fields to save edit link");
+        }
+    } catch (err) {
+        console.error("submitTimeslotsNormal error:", err);
+    } finally {
+        try {
+            await page.close();
+        } catch (closeErr) {
+            console.warn("Failed to close page:", closeErr);
+        }
     }
-
-    const submitButton = await page.$("table.results button[name='save']");
-    if (submitButton) {
-        await submitButton.click();
-        await page.waitForNavigation({ waitUntil: "networkidle0" });
-        console.log("Timeslots submitted successfully");
-    } else {
-        console.error("Submit button not found on edit link page");
-    }
-
-    const editLinkInput = await page.$("#email");
-    const editLinkSubmitButton = await page.$("#send_edit_link_submit");
-    const editLink = await page.$eval(".alert-success div.input-group.input-group-sm input.form-control", (input) => (input as HTMLInputElement).value.trim());
-
-    if (editLinkInput && editLinkSubmitButton) {
-        await editLinkInput.type(clientEmail);
-        await editLinkSubmitButton.click();
-    }
-
-    await saveEditLink(weekLink, clientEmail, editLink);
-
-    await page.close();
 };
 
-const submitTimeslotsEditLink = async (weekLink: string, editLink: string, ids: string[], password: string, clientEmail: string): Promise<void> => {
+const submitTimeslotsEditLink = async (
+    weekLink: string,
+    editLink: string,
+    ids: string[],
+    password: string,
+    clientEmail: string
+): Promise<void> => {
     const browser = await getBrowser();
     const page = await browser.newPage();
-    await page.goto(editLink);
 
-    await typePassword(page, password);
+    try {
+        await page.goto(editLink);
+        await typePassword(page, password);
 
-    const selectedIDs = await getSelectedTimeslots(weekLink, password, clientEmail, page);
+        const selectedIDs = await getSelectedTimeslots(weekLink, password, clientEmail, page);
 
-    // deselect all selected timeslots
-    await page.$$eval("table.results tbody td", (cells, selectedIDs) => {
-        cells.forEach((cell) => {
-            const header = cell.getAttribute("headers");
-            if (header && selectedIDs.includes(header)) {
-                cell.querySelector("li.yes input[type=radio]")?.removeAttribute("checked");
-            }
-        });
-    }, selectedIDs);
+        // Deselect all currently selected timeslots
+        await page.$$eval("table.results tbody td", (cells, selectedIDs) => {
+            cells.forEach((cell) => {
+                const header = cell.getAttribute("headers");
+                if (header && selectedIDs.includes(header)) {
+                    cell.querySelector("li.yes input[type=radio]")?.removeAttribute("checked");
+                }
+            });
+        }, selectedIDs);
 
-    const submitButton = await page.$("table.results button[name='save']");
-    if (submitButton) {
+        const submitButton = await page.$("table.results button[name='save']");
+        if (!submitButton) {
+            throw new Error("Submit button not found on edit link page (deselect step)");
+        }
         await submitButton.click();
         await page.waitForNavigation({ waitUntil: "networkidle0" });
-    } else {
-        console.error("Submit button not found on edit link page");
-    }
 
-    // reload the page to ensure the changes are applied
-    await page.goto(editLink);
-    await typePassword(page, password);
+        // Reload page and re-authenticate
+        await page.goto(editLink);
+        await typePassword(page, password);
 
-    // select the new timeslots with the given ids
-    await page.$$eval("table.results tbody td", (cells, ids) => {
-        cells.forEach((cell) => {
-            const header = cell.getAttribute("headers");
-            if (header && ids.includes(header)) {
-                const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
-                if (yesInput) yesInput.setAttribute("checked", "");
-            }
-        });
-    }, ids);
+        // Select the new timeslots
+        await page.$$eval("table.results tbody td", (cells, ids) => {
+            cells.forEach((cell) => {
+                const header = cell.getAttribute("headers");
+                if (header && ids.includes(header)) {
+                    const yesInput = cell.querySelector("li.yes input[type=radio]") as HTMLInputElement | null;
+                    if (yesInput) yesInput.setAttribute("checked", "");
+                }
+            });
+        }, ids);
 
-    const newSubmitButton = await page.$("table.results .btn-edit .btn-success");
-    if (newSubmitButton) {
+        const newSubmitButton = await page.$("table.results .btn-edit .btn-success");
+        if (!newSubmitButton) {
+            throw new Error("Submit button not found on edit link page (select step)");
+        }
         await newSubmitButton.click();
         await page.waitForNavigation({ waitUntil: "networkidle0" });
-    } else {
-        console.error("Submit button not found on edit link page");
-    }
 
-    await page.close();
+    } catch (error) {
+        console.error("Error in submitTimeslotsEditLink:", error);
+        throw error;
+    } finally {
+        await page.close();
+    }
 };
