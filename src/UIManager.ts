@@ -29,9 +29,9 @@ export class UIManager {
             }
 
             event.preventDefault();
-            const username = usernameInput.value;
-            const email = emailInput.value;
-            const password = passwordInput.value;
+            const username = usernameInput.value.trim() || null;
+            const email = emailInput.value.trim().toLowerCase() || null;
+            const password = passwordInput.value.trim() || null;
 
             // if (!email.includes("hs-mittweida")) {
             //     alert("Please use your hs-mittweida email address.");
@@ -168,13 +168,14 @@ export class UIManager {
         link.innerHTML = `${data.link}`;
         output.appendChild(link);
 
-        // output the current edit link if it exists
-        if (data.editLink) {
-            const editLink = document.createElement("div");
-            editLink.className = "edit-link";
-            editLink.innerHTML = `<p>Link: <a href="${data.editLink}" target="_blank">${data.editLink}</a></p>`;
-            output.appendChild(editLink);
-        }
+        this.appendEditableLink(output, data, async (newLink) => {
+            const res = await fetch("/set-edit-link/", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ editLink: newLink, weekLink: data.link }),
+            });
+            return res;
+        });
 
         const timeslotContainer = document.createElement("div");
         timeslotContainer.className = "timeslot-container";
@@ -257,6 +258,83 @@ export class UIManager {
                 gdprPopup.classList.add("hidden");
                 gdprOverlay.classList.add("hidden");
             });
+        }
+    }
+
+    private appendEditableLink(container, data, onSave) {
+        const regex = /^https:\/\/terminplaner4\.dfn\.de\/[A-Za-z0-9]+\/vote\/[A-Za-z0-9#]+$/;
+
+        function createEditSection(currentLink: string) {
+            const wrapper = document.createElement("div");
+            wrapper.className = "edit-link";
+
+            const label = document.createElement("label");
+            label.textContent = "Enter your edit link:";
+            label.setAttribute("for", "editLinkInput");
+
+            const input = document.createElement("input");
+            input.type = "url";
+            input.id = "editLinkInput";
+            input.placeholder = "https://terminplaner4.dfn.de/...";
+            input.value = currentLink || "";
+
+            const button = document.createElement("button");
+            button.textContent = currentLink ? "Change" : "Set";
+
+            const error = document.createElement("p");
+            error.style.color = "red";
+            error.style.display = "none";
+
+            button.onclick = async () => {
+                const link = input.value.trim();
+                if (!regex.test(link)) {
+                    error.textContent = "Invalid link format.";
+                    error.style.display = "block";
+                    return;
+                }
+                error.style.display = "none";
+
+                try {
+                    const res = await onSave(link); // async save
+                    if (res.ok) {
+                        showLink(link);
+                    } else {
+                        error.textContent = "Failed to save link.";
+                        error.style.display = "block";
+                    }
+                } catch (err) {
+                    error.textContent = "Error connecting to server.";
+                    error.style.display = "block";
+                }
+            };
+
+            wrapper.appendChild(label);
+            wrapper.appendChild(input);
+            wrapper.appendChild(button);
+            wrapper.appendChild(error);
+            container.appendChild(wrapper);
+        }
+
+        function showLink(link) {
+            const div = document.createElement("div");
+            div.className = "edit-link";
+            div.innerHTML = `<p>Link: <a href="${link}" target="_blank">${link}</a></p>`;
+
+            const changeButton = document.createElement("button");
+            changeButton.textContent = "Change";
+            changeButton.onclick = () => {
+                container.innerHTML = "";
+                createEditSection(link);
+            };
+
+            div.appendChild(changeButton);
+            container.appendChild(div);
+        }
+
+        if (data.editLink) {
+            showLink(data.editLink);
+        } else {
+            createEditSection("");
         }
     }
 }

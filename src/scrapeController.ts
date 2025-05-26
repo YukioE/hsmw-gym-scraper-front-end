@@ -4,7 +4,6 @@ import bcrypt from "bcrypt";
 import fs from "fs";
 import path from "path";
 import { Timeslot, typePassword, WeekResult } from "./utils.js";
-import { Page } from "puppeteer";
 import { fileURLToPath } from "url";
 
 /**
@@ -111,7 +110,7 @@ const scrapeWeek = async (
         );
 
         // Get selected timeslots
-        const selectedTimeslots = await getSelectedTimeslots(weekURL, password, clientEmail, page);
+        const selectedTimeslots = await getSelectedTimeslots(weekURL, password, clientEmail);
 
         // Merge selection info
         const updatedTimeslotsWithSelection = updatedTimeslots.map((slot) => ({
@@ -162,7 +161,7 @@ const getEditLink = async (weekURL: string, clientEmail: string): Promise<string
             return null;
         }
 
-        const editLink = editLinks[clientEmail];
+        const editLink = editLinks[clientEmail.trim().toLowerCase()];
         if (!editLink) {
             console.warn(`No edit link found for email: ${clientEmail}`);
             return null;
@@ -221,7 +220,6 @@ const getSelectedTimeslots = async (
     weekURL: string,
     password: string,
     clientEmail: string,
-    page?: Page
 ): Promise<string[]> => {
     const editLink = await getEditLink(weekURL, clientEmail);
     if (!editLink) {
@@ -229,19 +227,14 @@ const getSelectedTimeslots = async (
     }
 
     const browser = await getBrowser();
-    let ownPage = false;
-    let currentPage: Page | undefined = page;
+    const page = await browser.newPage();
 
     try {
-        if (!currentPage) {
-            currentPage = await browser.newPage();
-            ownPage = true;
-            await currentPage.goto(editLink);
-        }
+        await page.goto(editLink);
 
-        await typePassword(currentPage, password);
+        await typePassword(page, password);
 
-        const selectedTimeslots = await currentPage.$$eval("table.results tbody td", (cells) => {
+        const selectedTimeslots = await page.$$eval("table.results tbody td", (cells) => {
             return cells
                 .map((cell) => {
                     const header = cell.getAttribute("headers");
@@ -257,13 +250,7 @@ const getSelectedTimeslots = async (
         console.error("Failed to get selected timeslots:", err);
         return [];
     } finally {
-        if (ownPage && currentPage) {
-            try {
-                await currentPage.close();
-            } catch (closeErr) {
-                console.warn("Error closing Puppeteer page:", closeErr);
-            }
-        }
+        await page.close();
     }
 };
 
@@ -461,7 +448,7 @@ const submitTimeslotsEditLink = async (
         await page.goto(editLink);
         await typePassword(page, password);
 
-        const selectedIDs = await getSelectedTimeslots(weekLink, password, clientEmail, page);
+        const selectedIDs = await getSelectedTimeslots(weekLink, password, clientEmail);
 
         // Deselect all currently selected timeslots
         await page.$$eval("table.results tbody td", (cells, selectedIDs) => {
@@ -507,5 +494,44 @@ const submitTimeslotsEditLink = async (
         throw error;
     } finally {
         await page.close();
+    }
+};
+
+export const setEditLink = async (req: Request, res: Response): Promise<void> => {
+    const { PASSWORD: envHash } = process.env;
+    const clientPassword = req.cookies.password;
+    const clientUsername = req.cookies.username;
+    const clientEmail = req.cookies.email;
+
+    if (!clientUsername || !clientEmail) {
+        res.status(400).json({ error: "Username or email is missing" });
+        return;
+    }
+
+    if (!clientPassword || !envHash) {
+        res.status(400).json({ error: "Password or server hash missing" });
+        return;
+    }
+
+    const correctPassword = await bcrypt.compare(clientPassword, envHash);
+
+    if (!correctPassword) {
+        res.status(403).json({ error: "Password is incorrect" });
+        return;
+    }
+
+    const { weekLink, editLink } = req.body;
+
+    if (!weekLink || !editLink) {
+        res.status(400).json({ error: "Missing weekLink or editLink" });
+        return;
+    }
+
+    try {
+        await saveEditLink(weekLink, clientEmail, editLink);
+        res.status(200).json({ message: "Edit link saved successfully" });
+    } catch (err) {
+        console.error("Failed to save edit link:", err);
+        res.status(500).json({ error: "Internal server error while saving edit link" });
     }
 };
