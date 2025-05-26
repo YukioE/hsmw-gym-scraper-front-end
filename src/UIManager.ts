@@ -11,6 +11,7 @@ export class UIManager {
         this.initLogoutButton();
         this.initSubmitSelectionButton();
         this.initUpdateButton();
+        this.checkGDPRConsent();
     }
 
     private initLoginForm() {
@@ -238,5 +239,24 @@ export class UIManager {
             alert("Selection submitted successfully!");
             button.innerHTML = "Submit";
         });
+    }
+
+    private checkGDPRConsent() {
+        const gdprPopup = $<HTMLDivElement>("#gdpr-popup")!;
+        const gdprOverlay = $<HTMLDivElement>("#gdpr-overlay")!;
+        const acceptButton = $<HTMLButtonElement>("#gdpr-accept")!;
+
+        const consent = getCookie("gdpr_consent");
+        if (!consent) {
+            gdprOverlay.classList.remove("hidden");
+            gdprPopup.classList.remove("hidden");
+
+            acceptButton.addEventListener("click", () => {
+                const expiryDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days expiration
+                setCookie("gdpr_consent", "accepted", expiryDate);
+                gdprPopup.classList.add("hidden");
+                gdprOverlay.classList.add("hidden");
+            });
+        }
     }
 }
