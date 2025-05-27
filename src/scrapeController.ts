@@ -75,7 +75,7 @@ const scrapeWeek = async (
     const page = await browser.newPage();
 
     try {
-        await page.goto(weekURL, { waitUntil: "networkidle2", timeout: 10000 });
+        await page.goto(weekURL, { waitUntil: "domcontentloaded" });
 
         await typePassword(page, password);
 
@@ -230,7 +230,7 @@ const getSelectedTimeslots = async (
     const page = await browser.newPage();
 
     try {
-        await page.goto(editLink);
+        await page.goto(editLink, { waitUntil: "domcontentloaded" });
 
         await typePassword(page, password);
 
@@ -259,7 +259,7 @@ const getWeeks = async (url: string): Promise<Record<number, string>> => {
     const page = await browser.newPage();
 
     try {
-        await page.goto(url);
+        await page.goto(url, { waitUntil: "domcontentloaded" });
 
         await page.waitForSelector(".hsmw-main");
 
@@ -361,7 +361,7 @@ const submitTimeslotsNormal = async (
     const page = await browser.newPage();
 
     try {
-        await page.goto(weekLink);
+        await page.goto(weekLink, { waitUntil: "domcontentloaded" });
 
         await typePassword(page, password);
 
@@ -393,7 +393,7 @@ const submitTimeslotsNormal = async (
         if (submitButton) {
             await Promise.all([
                 submitButton.click(),
-                page.waitForNavigation({ waitUntil: "networkidle0", timeout: 10000 }).catch((e) =>
+                page.waitForNavigation({ waitUntil: "domcontentloaded" }).catch((e) =>
                     console.warn("Navigation timeout after clicking submit:", e)
                 ),
             ]);
@@ -445,7 +445,7 @@ const submitTimeslotsEditLink = async (
     const page = await browser.newPage();
 
     try {
-        await page.goto(editLink);
+        await page.goto(editLink, { waitUntil: "domcontentloaded" });
         await typePassword(page, password);
 
         const selectedIDs = await getSelectedTimeslots(weekLink, password, clientEmail);
@@ -465,10 +465,10 @@ const submitTimeslotsEditLink = async (
             throw new Error("Submit button not found on edit link page (deselect step)");
         }
         await submitButton.click();
-        await page.waitForNavigation({ waitUntil: "networkidle0" });
+        await page.waitForNavigation({ waitUntil: "domcontentloaded" });
 
         // Reload page and re-authenticate
-        await page.goto(editLink);
+        await page.goto(editLink, { waitUntil: "domcontentloaded" });
         await typePassword(page, password);
 
         // Select the new timeslots
@@ -487,7 +487,7 @@ const submitTimeslotsEditLink = async (
             throw new Error("Submit button not found on edit link page (select step)");
         }
         await newSubmitButton.click();
-        await page.waitForNavigation({ waitUntil: "networkidle0" });
+        await page.waitForNavigation({ waitUntil: "domcontentloaded" });
 
     } catch (error) {
         console.error("Error in submitTimeslotsEditLink:", error);

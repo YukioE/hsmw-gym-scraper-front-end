@@ -33,10 +33,10 @@ export class UIManager {
             const email = emailInput.value.trim().toLowerCase() || null;
             const password = passwordInput.value.trim() || null;
 
-            // if (!email.includes("hs-mittweida")) {
-            //     alert("Please use your hs-mittweida email address.");
-            //     return;
-            // }
+            if (!email.includes("hs-mittweida")) {
+                alert("Please use your hs-mittweida email address.");
+                return;
+            }
 
             setCookie("username", username);
             setCookie("email", email);
@@ -168,7 +168,7 @@ export class UIManager {
         link.innerHTML = `${data.link}`;
         output.appendChild(link);
 
-        this.appendEditableLink(output, data, async (newLink) => {
+        this.appendEditableLink(output, data, async (newLink: string) => {
             const res = await fetch("/set-edit-link/", {
                 method: "POST",
                 headers: { "Content-Type": "application/json" },
@@ -261,7 +261,7 @@ export class UIManager {
         }
     }
 
-    private appendEditableLink(container, data, onSave) {
+    private appendEditableLink(container: HTMLElement, data: WeekResult, onSave: (link: string) => Promise<Response>) {
         const regex = /^https:\/\/terminplaner4\.dfn\.de\/[A-Za-z0-9]+\/vote\/[A-Za-z0-9#]+$/;
 
         function createEditSection(currentLink: string) {
@@ -312,10 +312,10 @@ export class UIManager {
             wrapper.appendChild(input);
             wrapper.appendChild(button);
             wrapper.appendChild(error);
-            container.appendChild(wrapper);
+            container.before(wrapper);
         }
 
-        function showLink(link) {
+        function showLink(link: string) {
             const div = document.createElement("div");
             div.className = "edit-link";
             div.innerHTML = `<p>Link: <a href="${link}" target="_blank">${link}</a></p>`;
