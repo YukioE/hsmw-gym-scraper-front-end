@@ -11,7 +11,7 @@ export class UIManager {
         this.initLogoutButton();
         this.initSubmitSelectionButton();
         this.initUpdateButton();
-        this.checkGDPRConsent();
+        // this.checkGDPRConsent();
     }
 
     private initLoginForm() {
@@ -312,7 +312,7 @@ export class UIManager {
             wrapper.appendChild(input);
             wrapper.appendChild(button);
             wrapper.appendChild(error);
-            container.before(wrapper);
+            container.prepend(wrapper);
         }
 
         function showLink(link: string) {
