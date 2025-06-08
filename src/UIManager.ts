@@ -298,6 +298,7 @@ export class UIManager {
                     const res = await onSave(link); // async save
                     if (res.ok) {
                         showLink(link);
+                        await this.scrapeTimeSlots();
                     } else {
                         error.textContent = "Failed to save link.";
                         error.style.display = "block";
